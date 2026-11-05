@@ -115,7 +115,7 @@ function flowBars(host, out, inn) {
   try { R = await api("/api/results"); } catch (e) { $("#empty").hidden = false; return; }
   $("#app").hidden = false;
   const m = R.meta, M = R.models || {};
-  $("#sub").textContent = `${m.date_min} sampai ${m.date_max}. Data dibaca dari ${m.source === "hdfs" ? "HDFS" : "folder lokal"}, dianalisis ${R.generated_at} (${R.seconds} detik).`;
+  $("#sub").textContent = `${m.date_min} sampai ${m.date_max}. Data dibaca dari ${m.source === "hdfs" ? "HDFS" : "folder lokal"}, diproses dengan ${m.engine === "spark" ? "Apache Spark" : "pandas"}, dianalisis ${R.generated_at} (${R.seconds} detik).`;
   $("#kpis").innerHTML = [[fmt(m.rows), "perjalanan"], [fmt(m.stations), "stasiun"], [fmt(m.days), "hari data"], [pct(m.member_share), "dari member"]]
     .map(([v, l]) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
   $("#insights").innerHTML = R.insights.map((t) => `<li>${esc(t)}</li>`).join("");
