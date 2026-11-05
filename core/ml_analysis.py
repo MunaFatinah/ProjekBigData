@@ -52,27 +52,12 @@ def load_clean(files) -> pd.DataFrame:
     return df
 
 
-def load_spark_aggregates(d: Path) -> dict:
-    """Baca hasil agregasi kecil yang ditulis core/spark_job.py (Spark yang mengerjakan bagian berat)."""
-    d = Path(d)
-    rd = lambda n, **kw: pd.read_csv(d / f"{n}.csv", **kw)
-    meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
-    flow = rd("flow").rename(columns={"n_out": "out", "n_in": "in"})
-    flow = flow[["station", "out", "in", "net", "net_per_day", "out_per_day", "in_per_day", "block", "start_lat", "start_lng"]]
-    return {"meta": meta, "daily": rd("daily", parse_dates=["date"]), "hp": rd("hourly"), "per_date": rd("per_date"),
-            "top": rd("top_stations"), "flow": flow, "sample": rd("sample")}
-
-
 # ---------------------------------------------------------------- pola umum (BI)
-def _patterns(df, agg=None):
-    if agg is None:                      # jalur pandas (tanpa Spark)
-        df["day_type"] = np.where(df["dow"] >= 5, "weekend", "weekday")
-        ndays = df.groupby("day_type")["date"].nunique().to_dict()
-        hp = df.groupby(["day_type", "hour", "member_casual"]).size().rename("trips").reset_index()
-        hp["avg_per_day"] = hp.apply(lambda r: r["trips"] / ndays[r["day_type"]], axis=1)
-        per_date = df.groupby(["date", "dow", "member_casual"]).size().rename("n").reset_index()
-    else:                                # jalur Spark: sudah dihitung terdistribusi
-        hp, per_date = agg["hp"], agg["per_date"]
+def _patterns(df):
+    df["day_type"] = np.where(df["dow"] >= 5, "weekend", "weekday")
+    ndays = df.groupby("day_type")["date"].nunique().to_dict()
+    hp = df.groupby(["day_type", "hour", "member_casual"]).size().rename("trips").reset_index()
+    hp["avg_per_day"] = hp.apply(lambda r: r["trips"] / ndays[r["day_type"]], axis=1)
     hourly = {}
     for dt in ("weekday", "weekend"):
         hourly[dt] = {}
@@ -82,6 +67,7 @@ def _patterns(df, agg=None):
                 arr[int(r["hour"])] = float(r["avg_per_day"])
             hourly[dt][u] = arr
 
+    per_date = df.groupby(["date", "dow", "member_casual"]).size().rename("n").reset_index()
     dow = per_date.groupby(["dow", "member_casual"])["n"].mean().unstack(fill_value=0).reindex(range(7), fill_value=0)
     dow_profile = {u: [float(dow[u].get(i, 0)) if u in dow else 0.0 for i in range(7)] for u in ("member", "casual")}
     return hp, hourly, dow_profile
@@ -112,12 +98,9 @@ def _station_flows(df):
 
 
 # ---------------------------------------------------------------- model harian
-def _daily_frame(df, weather, agg=None):
-    if agg is None:
-        d = df.groupby("date").agg(trips=("ride_id", "size"), member_share=("is_member", "mean"),
-                                   avg_duration=("duration_min", "mean")).reset_index()
-    else:
-        d = agg["daily"].copy()
+def _daily_frame(df, weather):
+    d = df.groupby("date").agg(trips=("ride_id", "size"), member_share=("is_member", "mean"),
+                               avg_duration=("duration_min", "mean")).reset_index()
     full = pd.date_range(d["date"].min(), d["date"].max())
     gaps = full.difference(d["date"])
     note = None
@@ -226,13 +209,11 @@ def _daily_models(d, progress):
 
 
 # ---------------------------------------------------------------- klasifikasi member vs casual
-def _classification(df, out_dir: Path, progress, agg=None):
-    if agg is not None:                  # sampel 250 ribu baris sudah diambil Spark
-        df = agg["sample"]
+def _classification(df, out_dir: Path, progress):
     if df["is_member"].nunique() < 2:
         return {"available": False, "note": "Data hanya berisi satu tipe pengguna, klasifikasi dilewati."}
     progress(75, "Melatih model klasifikasi member vs casual")
-    s = df if agg is not None else df.sample(min(len(df), 250_000), random_state=42)
+    s = df.sample(min(len(df), 250_000), random_state=42)
     X, y = s[CLS_FEATURES], s["is_member"]
     Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     clf = HistGradientBoostingClassifier(max_iter=150, learning_rate=0.1, random_state=42).fit(Xtr, ytr)
@@ -337,44 +318,35 @@ def _build_texts(meta, hourly, dow_profile, flow, daily_res, cls):
 
 
 # ---------------------------------------------------------------- orkestrasi
-def run_analysis(df, weather, out_dir: Path, source: str, progress=lambda p, m: None, agg=None):
-    """df = DataFrame pandas (jalur tanpa Spark). agg = hasil load_spark_aggregates() (jalur Spark, df=None)."""
+def run_analysis(df: pd.DataFrame, weather, out_dir: Path, source: str, progress=lambda p, m: None):
     t0 = time.time()
     out_dir.mkdir(parents=True, exist_ok=True)
-    if agg is None:
-        df = df.copy()
-        df["date"] = pd.to_datetime(df["date"])
-        df["ended_at"] = pd.to_datetime(df["ended_at"])
-        df["end_hour"] = df["ended_at"].dt.hour
-        df["is_member"] = (df["member_casual"] == "member").astype(int)
-        df["is_electric"] = df["rideable_type"].astype(str).str.contains("electric").astype(int)
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    df["ended_at"] = pd.to_datetime(df["ended_at"])
+    df["end_hour"] = df["ended_at"].dt.hour
+    df["is_member"] = (df["member_casual"] == "member").astype(int)
+    df["is_electric"] = df["rideable_type"].astype(str).str.contains("electric").astype(int)
 
     progress(10, "Menghitung pola jam dan hari (BI)")
-    hp, hourly, dow_profile = _patterns(df, agg)
+    hp, hourly, dow_profile = _patterns(df)
     progress(25, "Menghitung arus sepeda per stasiun")
-    if agg is None:
-        flow = _station_flows(df)
-        top = (df.groupby("start_station_name").agg(trips=("ride_id", "size"), lat=("start_lat", "mean"), lng=("start_lng", "mean"),
-                                                    member_share=("is_member", "mean")).sort_values("trips", ascending=False).head(15).reset_index())
-    else:
-        flow, top = agg["flow"], agg["top"]
+    flow = _station_flows(df)
+    top = (df.groupby("start_station_name").agg(trips=("ride_id", "size"), lat=("start_lat", "mean"), lng=("start_lng", "mean"),
+                                                member_share=("is_member", "mean")).sort_values("trips", ascending=False).head(15).reset_index())
     progress(40, "Menyusun data harian dan menggabungkan cuaca")
-    daily, gap_note = _daily_frame(df, weather, agg)
+    daily, gap_note = _daily_frame(df, weather)
     daily_res = _daily_models(daily, progress)
     if gap_note:
         daily_res["note"] = gap_note
-    cls = _classification(df, out_dir, progress, agg)
+    cls = _classification(df, out_dir, progress)
 
     progress(90, "Menyusun insight dan rekomendasi")
-    if agg is None:
-        meta = {"rows": len(df), "stations": int(df["start_station_name"].nunique()),
-                "date_min": df["date"].min(), "date_max": df["date"].max(), "days": int(df["date"].nunique()),
-                "member_share": float(df["is_member"].mean()), "avg_duration": float(df["duration_min"].mean()),
-                "electric_share": float(df["is_electric"].mean()), "avg_distance": float(df["distance_km"].mean()),
-                "engine": "pandas"}
-    else:
-        meta = {**agg["meta"], "engine": "spark"}
-    meta.update(source=source, weather=bool(daily_res.get("has_weather")))
+    meta = {"rows": len(df), "stations": int(df["start_station_name"].nunique()),
+            "date_min": df["date"].min(), "date_max": df["date"].max(), "days": int(df["date"].nunique()),
+            "member_share": float(df["is_member"].mean()), "avg_duration": float(df["duration_min"].mean()),
+            "electric_share": float(df["is_electric"].mean()), "avg_distance": float(df["distance_km"].mean()),
+            "source": source, "weather": bool(daily_res.get("has_weather"))}
     insights, recs = _build_texts(meta, hourly, dow_profile, flow, daily_res, cls)
 
     # ---- CSV untuk Power BI

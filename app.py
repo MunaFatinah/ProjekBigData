@@ -6,25 +6,21 @@ import json
 import os
 import re
 import shutil
-import subprocess
-import sys
 import threading
 import time
-from collections import deque
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request, send_from_directory
 
 from core import hdfs_utils, nifi_client
 from core.intake import accept_file
-from core.ml_analysis import load_clean, load_spark_aggregates, predict_user, run_analysis
+from core.ml_analysis import load_clean, predict_user, run_analysis
 from core.weather import get_weather
 
 BASE = Path(__file__).parent
 DATA = BASE / "data"
 INCOMING, OUTBOX, CLEAN, RESULTS = (DATA / n for n in ("incoming", "outbox", "clean", "results"))
 HDFS_CACHE = DATA / "hdfs_cache"
-SPARK_OUT = RESULTS / "spark"
 WEATHER_CACHE = DATA / "weather.csv"
 NIFI_CFG = DATA / "nifi_config.json"
 HDFS_DIR = os.environ.get("HDFS_DIR", "/citibike/clean")
@@ -191,53 +187,11 @@ def api_sync():
     return jsonify(sent=sent, errors=errs)
 
 
-def _spark_input(source):
-    """Tentukan data yang dibaca Spark: HDFS kalau tersedia (fs.defaultFS = hdfs://), selain itu folder lokal."""
-    if source in ("auto", "hdfs") and hdfs_utils.available():
-        hd = hdfs_utils.status(HDFS_DIR)
-        fs = hdfs_utils.default_fs()
-        if hd["ok"] and fs.startswith("hdfs:") and any(f["name"].lower().endswith(".csv") for f in hd["files"]):
-            return f"{fs.rstrip('/')}{HDFS_DIR.rstrip('/')}/*.csv", "hdfs"
-    if source == "hdfs":
-        raise RuntimeError("Tidak ada file CSV di HDFS. Cek NiFi atau tekan Sinkronkan.")
-    if not any(CLEAN.glob("*.csv")):
-        raise RuntimeError("Belum ada data bersih. Upload CSV di halaman Input dulu.")
-    return CLEAN.resolve().as_uri() + "/*.csv", "local"
-
-
-def _run_spark(inp, prog):
-    """Jalankan core/spark_job.py lewat spark-submit; baris '@@persen|pesan' dari job dipakai sebagai progress."""
-    cmd = [shutil.which("spark-submit"), str(BASE / "core" / "spark_job.py"), "--input", inp, "--out", str(SPARK_OUT)]
-    env = {**os.environ, "PYSPARK_PYTHON": sys.executable, "PYSPARK_DRIVER_PYTHON": sys.executable}
-    p = subprocess.Popen(cmd, cwd=BASE, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                         text=True, encoding="utf-8", errors="replace")
-    tail = deque(maxlen=25)
-    for line in p.stdout:
-        line = line.rstrip()
-        if line.startswith("@@"):
-            pct, _, msg = line[2:].partition("|")
-            prog(int(pct) // 2, msg)                       # Spark = separuh pertama progress bar
-        elif line:
-            tail.append(line)
-    if p.wait() != 0:
-        raise RuntimeError("Spark gagal:\n" + "\n".join(tail))
-
-
 def _job(source):
     def prog(p, m):
         JOB.update(pct=p, msg=m)
     try:
-        if shutil.which("spark-submit"):                   # jalur Spark (big data)
-            inp, used = _spark_input(source)
-            prog(2, f"Menjalankan Spark ({'HDFS' if used == 'hdfs' else 'folder lokal'})")
-            _run_spark(inp, prog)
-            agg = load_spark_aggregates(SPARK_OUT)
-            m = agg["meta"]
-            w = get_weather(m["date_min"], m["date_max"], WEATHER_CACHE)
-            run_analysis(None, w, RESULTS, used, lambda p, t: prog(50 + p // 2, t), agg=agg)
-            JOB.update(error=None, finished=time.strftime("%Y-%m-%d %H:%M:%S"))
-            return
-        used = "local"                                     # jalur cadangan: pandas (tanpa Spark)
+        used = "local"
         files = []
         if source in ("auto", "hdfs") and hdfs_utils.available():
             prog(2, "Mengambil data bersih dari HDFS")

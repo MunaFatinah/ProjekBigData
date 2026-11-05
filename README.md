@@ -37,12 +37,6 @@ python scripts/make_sample_data.py --days 100 --out sample_data --per-month
 ```
 Data ini **sintetis** (dibuat dengan pola yang ditanam), hanya untuk menguji pipeline. Jangan dipakai untuk laporan.
 
-## Apache Spark
-Bagian berat (baca CSV dari HDFS, hitung trip harian, pola jam, arus stasiun, stasiun tersibuk, sampel klasifikasi) dikerjakan
-**Spark** lewat `core/spark_job.py`. `app.py` memanggilnya otomatis dengan `spark-submit` saat tombol Jalankan Analisis ditekan,
-hasil kecilnya masuk `data/results/spark/`, lalu `core/ml_analysis.py` melatih model scikit-learn dari hasil itu.
-Kalau `spark-submit` tidak ada di PATH, aplikasi otomatis kembali memakai pandas. Butuh Java 17/21 dan `JAVA_HOME`.
-
 ## Manajemen data
 | Tahap | Lokasi | Isi |
 |---|---|---|
@@ -79,7 +73,6 @@ core/intake.py         cek kolom CSV bersih
 core/hdfs_utils.py     pembungkus `hdfs dfs` (put diverifikasi ke isi HDFS)
 core/nifi_client.py    membuat dan menjalankan flow NiFi otomatis (REST API)
 core/weather.py        cuaca Open-Meteo
-core/spark_job.py      agregasi terdistribusi dengan Spark (spark-submit)
 core/ml_analysis.py    BI, prediksi, klasifikasi, rekomendasi
 templates/, static/    tampilan (grafik SVG, tanpa library eksternal)
 scripts/               generator data sintetis

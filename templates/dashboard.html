@@ -11,16 +11,8 @@
   <div class="head">
     <h1>Apa yang menggerakkan perjalanan Citi Bike?</h1>
     <p class="lede" id="sub"></p>
-    <div class="row" id="badges" style="margin-top:10px;gap:8px"></div>
   </div>
   <div class="kpis" id="kpis"></div>
-
-  <section class="block">
-    <h2>Cara data diproses</h2>
-    <p class="sub" id="engine-sub"></p>
-    <div id="engine-note"></div>
-    <div id="flow" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px"></div>
-  </section>
 
   <section class="block">
     <h2>Temuan utama</h2>
@@ -116,17 +108,7 @@ function flowBars(host, out, inn) {
   try { R = await api("/api/results"); } catch (e) { $("#empty").hidden = false; return; }
   $("#app").hidden = false;
   const m = R.meta, M = R.models || {};
-  const isSpark = m.engine === "spark", src = m.source === "hdfs" ? "HDFS" : "folder lokal";
-  $("#sub").textContent = `${m.date_min} sampai ${m.date_max}. Data dibaca dari ${src}, diproses dengan ${isSpark ? "Apache Spark" : "pandas"}, dianalisis ${R.generated_at}.`;
-  $("#badges").innerHTML = `<span class="tag ${isSpark ? "ok" : "warn"}">${isSpark ? "Apache Spark" : "pandas (tanpa Spark)"}</span><span class="tag mute">Sumber: ${src}</span><span class="tag mute">${m.weather ? "Cuaca: Open-Meteo" : "Tanpa data cuaca"}</span>`;
-  $("#engine-sub").textContent = `Dari data mentah sampai halaman ini, ${fmt(m.rows)} perjalanan melewati empat tahap.`;
-  if (!isSpark) $("#engine-note").innerHTML = `<div class="note warn">Perintah <code>spark-submit</code> tidak ditemukan di PATH, jadi agregasi dikerjakan pandas di satu mesin. Pasang Spark dan Java 17/21 lalu jalankan analisis lagi.</div>`;
-  const stages = [
-    ["1. Penyimpanan", src === "HDFS" ? "Hadoop HDFS" : "Folder lokal", `${fmt(m.rows)} perjalanan dari ${fmt(m.stations)} stasiun, ${fmt(m.days)} hari data.`],
-    ["2. Agregasi", isSpark ? "Apache Spark" : "pandas", isSpark ? "Menghitung trip per hari, pola jam, arus sepeda per stasiun, stasiun tersibuk, dan sampel klasifikasi secara terdistribusi." : "Menghitung agregasi yang sama di satu mesin."],
-    ["3. Machine learning", "scikit-learn", "Random forest untuk faktor penjelas dan prediksi 7 hari, gradient boosting untuk member vs casual, dilatih dari hasil agregasi."],
-    ["4. Dashboard", "Halaman ini", `Tahap ML dan penyusunan insight selesai dalam ${R.seconds} detik (belum termasuk waktu Spark).`]];
-  $("#flow").innerHTML = stages.map(([t, b, d]) => `<div class="panel"><span class="lede" style="font-size:.85rem">${esc(t)}</span><h3 style="margin:4px 0 6px">${esc(b)}</h3><p class="lede" style="font-size:.9rem">${esc(d)}</p></div>`).join("");
+  $("#sub").textContent = `${m.date_min} sampai ${m.date_max}. Data dibaca dari ${m.source === "hdfs" ? "HDFS" : "folder lokal"}, dianalisis ${R.generated_at} (${R.seconds} detik).`;
   $("#kpis").innerHTML = [[fmt(m.rows), "perjalanan"], [fmt(m.stations), "stasiun"], [fmt(m.days), "hari data"], [pct(m.member_share), "dari member"]]
     .map(([v, l]) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
   $("#insights").innerHTML = R.insights.map((t) => `<li>${esc(t)}</li>`).join("");
@@ -201,7 +183,7 @@ function flowBars(host, out, inn) {
   flowBars($("#f-sore"), R.flows.sore_keluar, R.flows.sore_masuk);
   hbars($("#top"), R.top_stations.map((s) => ({ label: s.start_station_name, value: s.trips, color: C.member })), { f: (v) => fmt(v) });
 
-  // ----- rekomendasi & unduhan
+  // ----- rekomendasi
   $("#recs").innerHTML = R.recommendations.map((r) => `<div class="rec"><h3>${esc(r.judul)}</h3><p>${esc(r.isi)}</p><div class="ev">${esc(r.bukti)}</div></div>`).join("");
 })();
 </script>
