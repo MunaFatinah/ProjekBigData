@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Citi Bike Insight{% endblock %}
+{% block body %}
+<div id="empty" class="empty panel" hidden>
+  <h2>Belum ada hasil analisis</h2>
+  <p class="lede">Upload data di halaman Input, lalu jalankan analisis di halaman NiFi dan Hadoop.</p>
+  <a class="btn" href="/pipeline" style="text-decoration:none">Ke halaman pipeline</a>
+</div>
+
+<div id="app" hidden>
+  <div class="head">
+    <h1>Apa yang menggerakkan perjalanan Citi Bike?</h1>
+    <p class="lede" id="sub"></p>
+  </div>
+  <div class="kpis" id="kpis"></div>
+
+  <section class="block">
+    <h2>Temuan utama</h2>
+    <p class="sub">Dirangkum otomatis dari data yang dianalisis.</p>
+    <ul class="insights" id="insights"></ul>
+  </section>
+
+  <section class="block">
+    <h2>Pola penggunaan</h2>
+    <p class="sub">Rata-rata trip per jam pada satu hari. Member mengikuti jam komuter, casual mengikuti jam santai.</p>
+    <div class="legend"><span><i style="background:var(--member)"></i>Member</span><span><i style="background:var(--casual)"></i>Casual</span></div>
+    <div class="grid2">
+      <div class="panel"><h3>Hari kerja</h3><div id="h-wk"></div></div>
+      <div class="panel"><h3>Akhir pekan</h3><div id="h-we"></div></div>
+    </div>
+    <div class="panel"><h3>Rata-rata trip per hari dalam minggu</h3><div id="dow"></div></div>
+  </section>
+
+  <section class="block">
+    <h2>Hari ini dipengaruhi apa dari hari lampau?</h2>
+    <p class="sub" id="bi-sub"></p>
+    <div class="panel"><h3>Trip harian</h3><div id="daily"></div></div>
+    <div class="grid2">
+      <div class="panel"><h3>Kemiripan dengan hari-hari sebelumnya</h3><p class="lede" style="font-size:.9rem">Korelasi trip hari ini dengan trip N hari lalu, tren jangka panjang sudah dibuang. Puncak di 7 dan 14 menandakan siklus mingguan.</p><div id="ac"></div></div>
+      <div class="panel"><h3>Faktor penjelas jumlah trip</h3><p class="lede" style="font-size:.9rem" id="fac-sub"></p><div id="fac" style="margin-top:8px"></div></div>
+    </div>
+    <div class="panel" id="wpanel" hidden><h3>Pengaruh cuaca</h3><div id="weather"></div></div>
+  </section>
+
+  <section class="block">
+    <h2>Prediksi 7 hari ke depan</h2>
+    <p class="sub" id="fc-sub"></p>
+    <div class="panel"><div class="legend"><span><i style="background:var(--ink)"></i>Aktual</span><span><i style="background:var(--casual)"></i>Prediksi (area = rentang 80%)</span></div><div id="fc"></div></div>
+    <div class="panel" style="padding:8px 14px"><div style="overflow-x:auto"><table id="fctable"></table></div></div>
+  </section>
+
+  <section class="block">
+    <h2>Siapa yang naik: member atau casual?</h2>
+    <p class="sub">Model klasifikasi dilatih dari ciri perjalanan. Coba sendiri di bawah.</p>
+    <div class="grid2">
+      <div class="panel">
+        <div class="metrics" id="clsm"></div>
+        <h3>Petunjuk yang paling membedakan</h3><div id="clsi" style="margin-top:8px"></div>
+      </div>
+      <div class="panel">
+        <h3>Tebak jenis pengguna</h3>
+        <div class="row" style="margin:12px 0">
+          <label>Jam <select id="p-hour"></select></label>
+          <label>Hari <select id="p-dow"></select></label>
+        </div>
+        <div class="row" style="margin-bottom:12px">
+          <label>Durasi (menit) <input id="p-dur" type="number" min="1" max="600" value="12" style="width:84px"></label>
+          <label>Jarak (km) <input id="p-dist" type="number" min="0" max="40" step="0.1" value="2.1" style="width:84px"></label>
+          <label class="chk"><input id="p-el" type="checkbox"> Sepeda listrik</label>
+        </div>
+        <button class="btn" id="p-go">Prediksi</button>
+        <div id="p-out" style="margin-top:14px"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>Arus sepeda per stasiun (hari kerja)</h2>
+    <p class="sub">Selisih sepeda keluar dan masuk per hari. Batang oranye: stasiun cepat kosong. Batang biru: stasiun menumpuk.</p>
+    <div class="grid2">
+      <div class="panel"><h3>Pagi, 06.00 sampai 10.00</h3><div id="f-pagi"></div></div>
+      <div class="panel"><h3>Sore, 16.00 sampai 20.00</h3><div id="f-sore"></div></div>
+    </div>
+    <div class="panel"><h3>15 stasiun tersibuk</h3><div id="top" style="margin-top:8px"></div></div>
+  </section>
+
+  <section class="block">
+    <h2>Rekomendasi</h2>
+    <p class="sub">Setiap rekomendasi disertai angka pendukung dari analisis di atas.</p>
+    <div class="recs" id="recs"></div>
+  </section>
+
+  <section class="block">
+    <h2>Untuk Power BI</h2>
+    <p class="sub">Unduh tabel hasil, lalu di Power BI Desktop pilih Get Data, Text/CSV, dan muat file-file ini. Hubungkan <code>daily_trips</code> ke tabel lain lewat kolom tanggal atau nama stasiun.</p>
+    <div class="dl" id="dl"></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"];
+const CSVS = [["daily_trips", "Trip harian + cuaca"], ["hourly_profile", "Profil per jam"], ["station_flow", "Arus stasiun"], ["top_stations", "Stasiun tersibuk"], ["forecast", "Prediksi 7 hari"], ["lag_correlation", "Korelasi lag"], ["feature_importance", "Faktor penting"], ["recommendations", "Rekomendasi"]];
+const short = (d) => d.slice(8, 10) + "/" + d.slice(5, 7);
+
+function flowBars(host, out, inn) {
+  const items = out.slice(0, 5).map((r) => ({ label: r.station, value: r.net_per_day, color: C.casual }))
+    .concat(inn.slice(0, 5).map((r) => ({ label: r.station, value: r.net_per_day, color: C.member })));
+  hbars(host, items.filter((i) => Math.abs(i.value) > 0.001), { f: (v) => (v > 0 ? "+" : "") + fmt(v, 1), diverging: true });
+}
+
+(async function () {
+  let R;
+  try { R = await api("/api/results"); } catch (e) { $("#empty").hidden = false; return; }
+  $("#app").hidden = false;
+  const m = R.meta, M = R.models || {};
+  $("#sub").textContent = `${m.date_min} sampai ${m.date_max}. Data dibaca dari ${m.source === "hdfs" ? "HDFS" : "folder lokal"}, dianalisis ${R.generated_at} (${R.seconds} detik).`;
+  $("#kpis").innerHTML = [[fmt(m.rows), "perjalanan"], [fmt(m.stations), "stasiun"], [fmt(m.days), "hari data"], [pct(m.member_share), "dari member"]]
+    .map(([v, l]) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
+  $("#insights").innerHTML = R.insights.map((t) => `<li>${esc(t)}</li>`).join("");
+
+  const hrs = [...Array(24).keys()], lab = hrs.map((h) => String(h).padStart(2, "0"));
+  const hl = (d) => ({ labels: lab, xEvery: 3, height: 220, yFmt: (v) => fmt(v), series: [{ name: "Member", color: C.member, values: d.member }, { name: "Casual", color: C.casual, values: d.casual }] });
+  lineChart($("#h-wk"), hl(R.hourly.weekday));
+  lineChart($("#h-we"), hl(R.hourly.weekend));
+  barChart($("#dow"), { items: HARI.map((h, i) => ({ label: h, value: R.dow.member[i] + R.dow.casual[i], color: i >= 5 ? C.casual : C.member })), height: 220 });
+
+  // ----- BI
+  const note = M.note ? `<div class="note warn">${esc(M.note)}</div>` : "";
+  if (M.available) {
+    $("#bi-sub").textContent = m.weather ? "Trip harian dibandingkan dengan trip hari-hari sebelumnya dan cuaca New York (Open-Meteo)." : "Trip harian dibandingkan dengan trip hari-hari sebelumnya. Data cuaca tidak berhasil diambil (butuh internet), jadi faktor cuaca tidak ikut dihitung.";
+    const dd = R.daily, ev = Math.ceil(dd.dates.length / 12);
+    lineChart($("#daily"), { labels: dd.dates.map(short), xEvery: ev, series: [{ name: "Trip", color: C.member, values: dd.trips }], height: 240 });
+    $("#daily").insertAdjacentHTML("afterend", note);
+    barChart($("#ac"), { items: M.autocorr.map((a) => ({ label: "" + a.lag, value: Math.max(0, a.corr || 0), color: a.lag % 7 === 0 ? C.casual : C.member })), yFmt: (v) => fmt(v, 1), height: 200 });
+    if (M.factors) {
+      $("#fac-sub").textContent = `Model random forest menjelaskan ${fmt(M.factors.r2 * 100)}% variasi pada ${M.factors.test_days} hari uji (galat rata-rata ${fmt(M.factors.mae)} trip). Hasil pada data uji sedikit bersifat indikatif.`;
+      hbars($("#fac"), M.factors.importance.map((r) => ({ label: r.factor, value: r.share * 100, color: C.member })), { f: (v) => fmt(v) + "%" });
+    } else $("#fac-sub").textContent = "Data belum cukup untuk melatih model faktor (butuh sekitar 30 hari).";
+    const we = M.weather_effects || {}, rows = [];
+    if (we.rain_pct != null) rows.push(`<tr><td>Hari hujan (≥1 mm), ${we.rain_days} hari</td><td class="num"><b>${we.rain_pct > 0 ? "+" : ""}${fmt(we.rain_pct, 1)}%</b></td><td>trip dibanding hari kering pada hari yang sama dalam minggu</td></tr>`);
+    if (we.temp_pct_per_c != null) rows.push(`<tr><td>Kenaikan suhu 1°C</td><td class="num"><b>${we.temp_pct_per_c > 0 ? "+" : ""}${fmt(we.temp_pct_per_c, 1)}%</b></td><td>perubahan trip, pada rentang ${fmt(we.temp_range[0])}–${fmt(we.temp_range[1])}°C</td></tr>`);
+    const best = {};
+    (M.weather_corr || []).forEach((w) => { if (w.corr != null && (!best[w.factor] || Math.abs(w.corr) > Math.abs(best[w.factor].corr))) best[w.factor] = w; });
+    Object.values(best).forEach((w) => rows.push(`<tr><td>Korelasi ${w.factor.toLowerCase()}</td><td class="num"><b>${fmt(w.corr, 2)}</b></td><td>paling kuat pada jeda ${w.lag} hari (${w.lag === 0 ? "hari yang sama" : w.lag + " hari sebelumnya"})</td></tr>`));
+    if (rows.length) { $("#wpanel").hidden = false; $("#weather").innerHTML = "<table>" + rows.join("") + "</table>"; }
+  } else {
+    $("#bi-sub").textContent = M.note || "Data belum cukup.";
+  }
+
+  // ----- prediksi
+  const F = M.forecast;
+  if (F) {
+    $("#fc-sub").textContent = `Galat rata-rata ${fmt(F.mape, 1)}% (MAPE) pada ${F.test_days} hari uji, ${F.improvement_pct != null ? (F.improvement_pct >= 0 ? fmt(F.improvement_pct) + "% lebih akurat" : fmt(-F.improvement_pct) + "% kurang akurat") + " dibanding tebakan sederhana minggu lalu." : ""} Model memakai pola hari-hari sebelumnya dan kalender, bukan cuaca, karena cuaca masa depan belum diketahui.`;
+    const hl2 = F.history, fl = F.predictions, labels = hl2.map((h) => short(h.date)).concat(fl.map((f) => short(f.date)));
+    const a = hl2.map((h) => h.trips).concat(fl.map(() => null));
+    const p = hl2.map((h, i) => (i === hl2.length - 1 ? h.trips : null)).concat(fl.map((f) => f.pred));
+    lineChart($("#fc"), { labels, xEvery: 3, height: 260, series: [{ name: "Prediksi", color: C.casual, values: p, dash: "6 4", dots: true }, { name: "Aktual", color: C.ink, values: a }] });
+    // pita rentang digambar terpisah di atas grafik
+    const svg = $("#fc svg"), W = 720, H = 260, mg = { l: 52, r: 12, t: 10, b: 28 };
+    const all = a.concat(p).concat(fl.map((f) => f.upper)).filter((v) => v != null), hi = niceMax(Math.max(...all));
+    const x = (i) => mg.l + (i * (W - mg.l - mg.r)) / (labels.length - 1), y = (v) => mg.t + (1 - v / hi) * (H - mg.t - mg.b);
+    const s0 = hl2.length - 1, pts = [[x(s0), y(hl2[s0].trips)]].concat(fl.map((f, i) => [x(s0 + 1 + i), y(f.upper)]));
+    const lw = [[x(s0), y(hl2[s0].trips)]].concat(fl.map((f, i) => [x(s0 + 1 + i), y(f.lower)])).reverse();
+    svg.insertBefore(mk("path", { d: "M" + pts.concat(lw).map((q) => q.join(" ")).join("L") + "Z", fill: C.casual, opacity: ".14" }), svg.querySelector("path"));
+    $("#fctable").innerHTML = "<tr><th>Tanggal</th><th>Hari</th><th class='num'>Prediksi trip</th><th class='num'>Rentang 80%</th></tr>" + fl.map((f) => `<tr><td>${f.date}</td><td>${f.dow}</td><td class="num"><b>${fmt(f.pred)}</b></td><td class="num">${fmt(f.lower)} – ${fmt(f.upper)}</td></tr>`).join("");
+  } else {
+    $("#fc-sub").textContent = M.note || "Data belum cukup untuk prediksi.";
+    $("#fc").parentElement.hidden = true; $("#fctable").parentElement.parentElement.hidden = true;
+  }
+
+  // ----- klasifikasi
+  const K = R.classification;
+  if (K.available) {
+    $("#clsm").innerHTML = [[pct(K.accuracy, 1), "akurasi"], [fmt(K.roc_auc, 2), "AUC"], [pct(K.baseline_accuracy, 1), "tebakan acak (mayoritas)"]].map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join("");
+    hbars($("#clsi"), K.importance.map((r) => ({ label: r.factor, value: r.share * 100 })), { f: (v) => fmt(v) + "%" });
+  } else { $("#clsm").innerHTML = `<p>${esc(K.note || "")}</p>`; $("#p-go").disabled = true; }
+  $("#p-hour").innerHTML = hrs.map((h) => `<option value="${h}" ${h === 8 ? "selected" : ""}>${String(h).padStart(2, "0")}.00</option>`).join("");
+  $("#p-dow").innerHTML = HARI.map((h, i) => `<option value="${i}">${h}</option>`).join("");
+  $("#p-go").onclick = async () => {
+    try {
+      const r = await api("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hour: +$("#p-hour").value, dow: +$("#p-dow").value, duration_min: +$("#p-dur").value, distance_km: +$("#p-dist").value, is_electric: $("#p-el").checked ? 1 : 0 }) });
+      $("#p-out").innerHTML = `<b style="font:700 1.2rem var(--display)">${r.label === "member" ? "Kemungkinan besar member" : "Kemungkinan besar casual"}</b><div class="result-meter"><div style="width:${r.member * 100}%;background:var(--member)"></div><div style="width:${r.casual * 100}%;background:var(--casual)"></div></div><span class="lede" style="font-size:.9rem">Member ${pct(r.member)} · Casual ${pct(r.casual)}</span>`;
+    } catch (e) { $("#p-out").innerHTML = `<div class="note bad">${esc(e.message)}</div>`; }
+  };
+
+  // ----- stasiun
+  flowBars($("#f-pagi"), R.flows.pagi_keluar, R.flows.pagi_masuk);
+  flowBars($("#f-sore"), R.flows.sore_keluar, R.flows.sore_masuk);
+  hbars($("#top"), R.top_stations.map((s) => ({ label: s.start_station_name, value: s.trips, color: C.member })), { f: (v) => fmt(v) });
+
+  // ----- rekomendasi & unduhan
+  $("#recs").innerHTML = R.recommendations.map((r) => `<div class="rec"><h3>${esc(r.judul)}</h3><p>${esc(r.isi)}</p><div class="ev">${esc(r.bukti)}</div></div>`).join("");
+  $("#dl").innerHTML = CSVS.map(([k, l]) => `<a href="/api/export/${k}.csv">${l}</a>`).join("");
+})();
+</script>
+{% endblock %}

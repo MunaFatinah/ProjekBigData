@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>{% block title %}Citi Bike Insight{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <header class="top">
+    <div class="top-in">
+      <a class="brand" href="/">Citi Bike Insight</a>
+      <nav class="line" aria-label="Alur data">
+        <a id="stop-input" class="stop {{ 'on' if page == 'input' }}" href="/"><span class="dot"></span><b>Input</b><small>Upload CSV</small></a>
+        <a id="stop-pipeline" class="stop {{ 'on' if page == 'pipeline' }}" href="/pipeline"><span class="dot"></span><b>NiFi dan Hadoop</b><small>Pipeline</small></a>
+        <a id="stop-dashboard" class="stop {{ 'on' if page == 'dashboard' }}" href="/dashboard"><span class="dot"></span><b>Dashboard</b><small>Hasil analisis</small></a>
+      </nav>
+    </div>
+  </header>
+  <main>{% block body %}{% endblock %}</main>
+  <script src="{{ url_for('static', filename='common.js') }}"></script>
+  {% block script %}{% endblock %}
+</body>
+</html>

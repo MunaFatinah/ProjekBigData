@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+data/incoming/*
+data/outbox/*
+data/clean/*
+data/results/*
+data/hdfs_cache/
+data/weather.csv
+!data/*/.gitkeep
+sample_data/
+data/nifi_config.json

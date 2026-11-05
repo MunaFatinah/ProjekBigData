@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}NiFi dan Hadoop · Citi Bike Insight{% endblock %}
+{% block body %}
+<div class="head">
+  <h1>NiFi dan Hadoop</h1>
+  <p class="lede">NiFi mengambil file bersih dari folder antrean lalu menyimpannya ke HDFS. Halaman ini menunjukkan posisi tiap file dan menjalankan analisis dari data di HDFS.</p>
+</div>
+
+<section class="block" style="margin-top:0">
+  <h2>Koneksi NiFi <span id="nstate"></span></h2>
+  <p class="sub">Aplikasi membuat dan menjalankan flow GetFile → PutHDFS di NiFi sendiri lewat REST API. Kamu cukup mengisi kredensial NiFi satu kali; setelah itu tiap upload memastikan flow berjalan.</p>
+  <div class="panel">
+    <div id="nform">
+      <dl class="kv" style="align-items:center">
+        <dt><label for="n_url">URL NiFi</label></dt><dd><input id="n_url" style="width:100%"></dd>
+        <dt><label for="n_user">Username</label></dt><dd><input id="n_user" style="width:100%" autocomplete="off"></dd>
+        <dt><label for="n_pass">Password</label></dt><dd><input id="n_pass" type="password" style="width:100%" autocomplete="off" placeholder="(sudah tersimpan kalau pernah berhasil)"></dd>
+        <dt><label for="n_conf">Config Hadoop</label></dt><dd><input id="n_conf" style="width:100%" placeholder="D:\hadoop-3.5.0\etc\hadoop\core-site.xml,D:\hadoop-3.5.0\etc\hadoop\hdfs-site.xml"></dd>
+      </dl>
+      <div class="row" style="margin-top:14px">
+        <button class="btn" id="nconnect">Hubungkan dan buat flow otomatis</button>
+        <span id="nmsg" class="lede" style="margin:0;font-size:.9rem"></span>
+      </div>
+      <p class="lede" style="font-size:.85rem;margin-top:10px">Kredensial NiFi 2.x dibuat otomatis saat pertama jalan: cari kata <code>Generated</code> di <code>&lt;folder-nifi&gt;/logs/nifi-app.log</code>. Disimpan lokal di <code>data/nifi_config.json</code> (tidak ikut ke GitHub).</p>
+    </div>
+    <div id="nflow" style="margin-top:14px"></div>
+  </div>
+</section>
+
+<div class="grid2">
+  <div class="panel">
+    <h3>Antrean NiFi</h3>
+    <p class="lede" style="font-size:.92rem">File di sini menunggu diambil NiFi. Setelah NiFi mengambilnya, file hilang dari antrean dan statusnya berubah menjadi “Sudah di HDFS” (dicek langsung ke HDFS).</p>
+    <div id="outbox" style="margin-top:10px"></div>
+    <div id="delivery" style="margin-top:12px"></div>
+  </div>
+  <div class="panel">
+    <h3>HDFS <span id="hstate"></span></h3>
+    <p class="lede" style="font-size:.92rem">Folder tujuan: <code>{{ hdfs_dir }}</code></p>
+    <div id="hdfs" style="margin-top:10px"></div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn ghost" id="sync">Sinkronkan data bersih ke HDFS</button>
+      <span id="syncmsg" class="lede" style="margin:0;font-size:.9rem"></span>
+    </div>
+  </div>
+</div>
+
+<section class="block">
+  <h2>Jalankan analisis</h2>
+  <p class="sub">Membaca data bersih, mengambil cuaca harian New York, lalu melatih model dan menyusun insight. Hasilnya tampil di Dashboard.</p>
+  <div class="panel">
+    <div class="row">
+      <label for="source">Sumber data</label>
+      <select id="source">
+        <option value="auto">Otomatis (HDFS kalau ada, kalau tidak folder lokal)</option>
+        <option value="hdfs">Hanya dari HDFS</option>
+        <option value="local">Hanya dari folder lokal</option>
+      </select>
+      <button class="btn" id="run">Jalankan analisis</button>
+    </div>
+    <div class="bar" id="barwrap" hidden><i id="bar"></i></div>
+    <p id="msg" class="lede" style="margin-top:10px"></p>
+    <div id="done" hidden class="row" style="margin-top:12px"><a class="btn" href="/dashboard" style="text-decoration:none">Buka dashboard</a></div>
+  </div>
+</section>
+
+<details class="block">
+  <summary style="cursor:pointer;font-weight:600">Cadangan: membuat flow NiFi secara manual (tidak perlu kalau koneksi otomatis di atas berhasil)</summary>
+  <p class="sub">Dua processor saja. Buka NiFi di https://localhost:8443/nifi, seret dua processor ke kanvas, lalu hubungkan GetFile ke PutHDFS lewat relasi success.</p>
+  <div class="grid2">
+    <div class="panel">
+      <h3>GetFile</h3>
+      <dl class="kv">
+        <dt>Input Directory</dt><dd><code>{{ outbox_path }}</code></dd>
+        <dt>File Filter</dt><dd><code>.*\.csv</code></dd>
+        <dt>Keep Source File</dt><dd><code>false</code></dd>
+        <dt>Polling Interval</dt><dd><code>5 sec</code></dd>
+      </dl>
+    </div>
+    <div class="panel">
+      <h3>PutHDFS</h3>
+      <dl class="kv">
+        <dt>Hadoop Configuration Resources</dt><dd><code>C:\hadoop\etc\hadoop\core-site.xml,C:\hadoop\etc\hadoop\hdfs-site.xml</code> (sesuaikan lokasi Hadoop-mu)</dd>
+        <dt>Directory</dt><dd><code>{{ hdfs_dir }}</code></dd>
+        <dt>Conflict Resolution Strategy</dt><dd><code>replace</code></dd>
+        <dt>Auto-terminate relationships</dt><dd><code>success</code> dan <code>failure</code></dd>
+      </dl>
+    </div>
+  </div>
+  <div class="note" style="margin-top:14px">Sebelum menyalakan flow: jalankan <code>start-dfs</code>, cek <code>jps</code> menampilkan NameNode dan DataNode, lalu buat folder tujuan dengan <code>hdfs dfs -mkdir -p {{ hdfs_dir }}</code>. Langkah lengkap ada di <code>nifi/NIFI_SETUP.md</code>.</div>
+</details>
+{% endblock %}
+
+{% block script %}
+<script>
+let timer = null;
+function fileTable(files, empty) {
+  if (!files.length) return `<p class="lede" style="font-size:.92rem">${empty}</p>`;
+  return "<table>" + files.map((f) => `<tr><td>${esc(f.name)}</td><td class="num">${bytes(f.size)}</td><td class="num">${esc(f.modified)}</td></tr>`).join("") + "</table>";
+}
+const DSTATE = { hdfs: '<span class="tag ok">Sudah di HDFS</span>', antre: '<span class="tag warn">Menunggu NiFi</span>',
+  hilang: '<span class="tag bad">Tidak di antrean dan tidak di HDFS</span>' };
+async function loadNifi() {
+  let n;
+  try { n = await api("/api/nifi/status"); } catch (e) { n = { connected: false, reason: e.message }; }
+  $("#nstate").innerHTML = n.connected && n.flow ? '<span class="tag ok">Flow aktif</span>' : '<span class="tag warn">Belum aktif</span>';
+  if (!n.connected) { $("#nflow").innerHTML = n.reason ? `<div class="note warn">${esc(n.reason)}</div>` : ""; return; }
+  if (!n.flow) { $("#nflow").innerHTML = '<div class="note warn">Terhubung ke NiFi, tetapi flow CitiBike belum dibuat. Klik tombol di atas.</div>'; return; }
+  $("#nflow").innerHTML = "<table>" + n.processors.map((p) => `<tr><td>${esc(p.name)}</td><td>${p.state === "RUNNING" ? '<span class="tag ok">Running</span>' : '<span class="tag warn">' + esc(p.state) + "</span>"}</td><td>${p.valid === "VALID" ? "valid" : esc(p.valid || "") + " " + esc((p.problems || []).join("; "))}</td></tr>`).join("") + `</table><p class="lede" style="font-size:.88rem">FlowFile mengantre di NiFi: <b>${n.queued}</b></p>` +
+    n.errors.map((e) => `<div class="note bad">${esc(e)}</div>`).join("");
+}
+$("#nconnect").onclick = async () => {
+  $("#nmsg").textContent = "Menghubungkan dan membuat flow, tunggu sebentar"; $("#nconnect").disabled = true;
+  try {
+    const r = await api("/api/nifi/connect", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: $("#n_url").value, username: $("#n_user").value, password: $("#n_pass").value, hadoop_conf: $("#n_conf").value }) });
+    $("#nmsg").textContent = r.msg; $("#n_pass").value = "";
+  } catch (e) { $("#nmsg").textContent = "Gagal: " + e.message; }
+  $("#nconnect").disabled = false; loadNifi(); load();
+};
+api("/api/nifi/config").then((c) => { $("#n_url").value = c.url; $("#n_user").value = c.username; $("#n_conf").value = c.hadoop_conf; });
+async function load() {
+  const s = await api("/api/pipeline/status");
+  $("#delivery").innerHTML = s.delivery.length ? "<table>" + s.delivery.map((d) => `<tr><td>${esc(d.name)}</td><td>${DSTATE[d.state]}</td></tr>`).join("") + "</table>" : "";
+  $("#outbox").innerHTML = fileTable(s.outbox, "Antrean kosong. Semua file sudah diambil NiFi, atau belum ada upload.");
+  $("#hstate").innerHTML = s.hdfs.ok ? '<span class="tag ok">Terhubung</span>' : '<span class="tag warn">Belum terhubung</span>';
+  $("#hdfs").innerHTML = (s.hdfs.reason ? `<div class="note ${s.hdfs.ok ? "" : "warn"}">${esc(s.hdfs.reason)}</div>` : "") + (s.hdfs.ok ? fileTable(s.hdfs.files, "Belum ada file CSV di folder ini.") : "");
+  const a = s.analysis;
+  if (a.running) { $("#barwrap").hidden = false; $("#bar").style.width = a.pct + "%"; $("#msg").textContent = a.msg; $("#run").disabled = true; }
+  else {
+    $("#run").disabled = false;
+    if (a.error) { $("#msg").textContent = "Gagal: " + a.error; $("#barwrap").hidden = true; }
+    else if (a.finished) { $("#bar").style.width = "100%"; $("#barwrap").hidden = false; $("#msg").textContent = "Analisis selesai " + a.finished; $("#done").hidden = false; }
+    if (timer && !a.running) { clearInterval(timer); timer = null; refreshLine(); }
+  }
+}
+function poll() { if (!timer) timer = setInterval(load, 1200); }
+$("#run").onclick = async () => {
+  $("#done").hidden = true; $("#msg").textContent = "Memulai";
+  try { await api("/api/run-analysis", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: $("#source").value }) }); poll(); load(); }
+  catch (e) { $("#msg").textContent = "Gagal: " + e.message; }
+};
+$("#sync").onclick = async () => {
+  $("#syncmsg").textContent = "Mengirim";
+  try { const r = await api("/api/hdfs/sync", { method: "POST" }); $("#syncmsg").textContent = r.sent.length + " file terkirim" + (r.errors.length ? ", gagal: " + r.errors.join("; ") : ""); load(); refreshLine(); }
+  catch (e) { $("#syncmsg").textContent = e.message; }
+};
+loadNifi(); setInterval(loadNifi, 4000); setInterval(() => { if (!timer) load(); }, 4000);
+load().then(() => { api("/api/pipeline/status").then((s) => { if (s.analysis.running) poll(); }); });
+</script>
+{% endblock %}

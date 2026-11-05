@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Input data · Citi Bike Insight{% endblock %}
+{% block body %}
+<div class="head">
+  <h1>Masukkan data perjalanan Citi Bike</h1>
+  <p class="lede">Upload CSV yang sudah kamu bersihkan secara manual. Aplikasi tidak membersihkan atau membuang baris apa pun; file hanya dicek kolomnya lalu diserahkan ke NiFi untuk dikirim ke Hadoop.</p>
+</div>
+
+<div class="panel">
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Pilih file CSV">
+    <b>Tarik file CSV ke sini, atau klik untuk memilih</b>
+    <span>Bisa lebih dari satu file. Kolom wajib: ride_id, started_at, ended_at, nama stasiun, koordinat, member_casual. Kolom turunan (date, hour, dow, durasi, jarak) dilengkapi otomatis kalau belum ada.</span>
+    <input id="file" type="file" accept=".csv" multiple hidden>
+  </div>
+  <ul class="picked" id="picked"></ul>
+  <div style="margin-top:16px">
+    <label class="chk"><input type="checkbox" id="direct"><span>Jalur cadangan: kirim juga langsung ke HDFS tanpa NiFi (jangan dicentang saat demo NiFi).</span></label>
+  </div>
+  <div class="row" style="margin-top:18px">
+    <button class="btn" id="go" disabled>Upload ke antrean NiFi</button>
+    <span id="state" class="lede" style="margin:0"></span>
+  </div>
+</div>
+
+<section class="block" id="result" hidden>
+  <h2>Hasil upload</h2>
+  <p class="sub">Tidak ada baris yang dibuang. Data tersimpan di <code>data/clean</code> dan salinannya masuk antrean <code>data/outbox</code> untuk NiFi.</p>
+  <div class="panel" style="padding:8px 14px"><div style="overflow-x:auto"><table id="rep"></table></div></div>
+  <div class="row" style="margin-top:18px"><a class="btn" href="/pipeline" style="text-decoration:none">Lanjut ke NiFi dan Hadoop</a></div>
+</section>
+
+{% endblock %}
+
+{% block script %}
+<script>
+const drop = $("#drop"), input = $("#file"), go = $("#go");
+let picked = [];
+function show() {
+  $("#picked").innerHTML = picked.map((f) => `<li><span>${esc(f.name)}</span><span>${bytes(f.size)}</span></li>`).join("");
+  go.disabled = !picked.length;
+}
+function add(list) { picked = picked.concat([...list].filter((f) => f.name.toLowerCase().endsWith(".csv"))); show(); }
+drop.onclick = () => input.click();
+drop.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } };
+input.onchange = () => { add(input.files); input.value = ""; };
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => add(e.dataTransfer.files));
+
+go.onclick = async () => {
+  const fd = new FormData();
+  picked.forEach((f) => fd.append("files", f));
+  fd.append("hdfs_direct", $("#direct").checked ? "1" : "0");
+  go.disabled = true;
+  $("#state").textContent = "Mengunggah dan memeriksa kolom. File besar butuh beberapa menit.";
+  try {
+    const { reports } = await api("/api/upload", { method: "POST", body: fd });
+    const head = "<tr><th>File</th><th class='num'>Jumlah baris</th><th>Rentang tanggal</th><th>Kolom dilengkapi</th><th>Status</th></tr>";
+    $("#rep").innerHTML = head + reports.map((r) => r.error
+      ? `<tr><td>${esc(r.file)}</td><td colspan="3">${esc(r.error)}</td><td><span class="tag bad">Gagal</span></td></tr>`
+      : `<tr><td>${esc(r.file)}<br><small style="color:var(--muted)">${r.seconds} dtk</small></td><td class="num"><b>${fmt(r.rows)}</b></td><td>${r.date_min} sampai ${r.date_max}</td><td>${r.kolom_dilengkapi.length ? esc(r.kolom_dilengkapi.join(", ")) : "-"}</td><td><span class="tag ok">Masuk antrean NiFi</span>${r.nifi ? `<br><small>${r.nifi.ok ? "" : "Perhatian: "}${esc(r.nifi.msg)}</small>` : ""}${r.hdfs_direct ? `<br><small>HDFS langsung: ${esc(r.hdfs_direct)}</small>` : ""}</td></tr>`).join("");
+    $("#result").hidden = false;
+    $("#state").textContent = "";
+    picked = []; show(); refreshLine();
+    $("#result").scrollIntoView({ behavior: "smooth" });
+  } catch (e) {
+    $("#state").textContent = "Gagal: " + e.message;
+    go.disabled = false;
+  }
+};
+</script>
+{% endblock %}
